@@ -85,7 +85,7 @@ export function GlobalModeDevPlugin({ uno, tokens, tasks, flushTasks, affectedMo
         if (process.env.TEST || process.env.NODE_ENV === 'test')
           return
         if (!resolved) {
-          const msg = '[unocss] entry module not found, have you add `import \'uno.css\'` in your main entry?'
+          const msg = '[unocss] Entry module not found. Did you add `import \'uno.css\'` in your main entry?'
           console.warn(msg)
           servers.forEach(({ ws }) => ws.send({
             type: 'error',
@@ -161,7 +161,7 @@ export function GlobalModeDevPlugin({ uno, tokens, tasks, flushTasks, affectedMo
         const { hash, css } = await generateCSS(layer)
         return {
           // add hash to the chunk of CSS that it will send back to client to check if there is new CSS generated
-          code: `__uno_hash_${hash}{--:'';}${css}`,
+          code: `${css}__uno_hash_${hash}{--:'';}`,
           map: { mappings: '' },
         }
       },

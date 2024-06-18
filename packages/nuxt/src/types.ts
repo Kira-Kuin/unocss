@@ -31,6 +31,20 @@ export interface UnocssNuxtOptions extends UserConfig {
   preflight?: boolean
 
   /**
+   * Set Nuxt's `features.inlineStyle` to `false` by default to make it work with UnoCSS.
+   *
+   * @default true
+   */
+  disableNuxtInlineStyle?: boolean
+
+  /**
+   * Automatically merge UnoCSS configs from Nuxt layers.
+   *
+   * @default false
+   */
+  nuxtLayers?: boolean
+
+  /**
    * Adjust the position of the `uno.css` injection. (Depends on `mode`)
    *
    * @default 'first'

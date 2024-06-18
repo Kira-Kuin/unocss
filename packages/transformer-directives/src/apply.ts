@@ -1,9 +1,9 @@
 import type { StringifiedUtil } from '@unocss/core'
 import { expandVariantGroup, notNull, regexScopePlaceholder } from '@unocss/core'
 import type { CssNode, Rule, Selector, SelectorList } from 'css-tree'
-import { clone, generate, parse } from 'css-tree'
-import type { TransformerDirectivesContext } from '.'
-import { transformDirectives } from '.'
+import { List, clone, generate, parse } from 'css-tree'
+import { transformDirectives } from './transform'
+import type { TransformerDirectivesContext } from './types'
 
 type Writeable<T> = { -readonly [P in keyof T]: T[P] }
 
@@ -22,20 +22,32 @@ export async function handleApply(ctx: TransformerDirectivesContext, node: Rule)
 
 export async function parseApply({ code, uno, offset, applyVariable }: TransformerDirectivesContext, node: Rule, childNode: CssNode) {
   const calcOffset = (pos: number) => offset ? pos + offset : pos
+  const original = code.original
 
   let body: string | undefined
   if (childNode.type === 'Atrule' && childNode.name === 'apply' && childNode.prelude && childNode.prelude.type === 'Raw') {
-    body = childNode.prelude.value.trim()
+    body = removeQuotes(childNode.prelude.value.trim())
   }
-  else if (childNode!.type === 'Declaration' && applyVariable.includes(childNode.property) && childNode.value.type === 'Raw') {
-    body = childNode.value.value.trim()
-    // remove quotes
-    if (/^(['"]).*\1$/.test(body))
-      body = body.slice(1, -1)
+
+  else if (childNode!.type === 'Declaration' && applyVariable.includes(childNode.property) && (childNode.value.type === 'Value' || childNode.value.type === 'Raw')) {
+    // Get raw value of the declaration
+    // as csstree would try to parse the content with operators, but we don't need them.
+    let rawValue = original.slice(
+      calcOffset(childNode.value.loc!.start.offset),
+      calcOffset(childNode.value.loc!.end.offset),
+    ).trim()
+    rawValue = removeQuotes(rawValue)
+    const items = rawValue
+      .split(/\s+/g)
+      .filter(Boolean)
+      .map(i => removeQuotes(i))
+    body = items.join(' ')
   }
 
   if (!body)
     return
+
+  body = removeComments(body)
 
   const classNames = expandVariantGroup(body)
     .split(/\s+/g)
@@ -53,7 +65,7 @@ export async function parseApply({ code, uno, offset, applyVariable }: Transform
       if (target)
         target[2] += item[2]
       else
-      // use spread operator to prevent reassign to uno internal cache
+        // use spread operator to prevent reassign to uno internal cache
         acc.push([...item] as Writeable<StringifiedUtil>)
       return acc
     }, [] as Writeable<StringifiedUtil>[])
@@ -61,26 +73,31 @@ export async function parseApply({ code, uno, offset, applyVariable }: Transform
   if (!utils.length)
     return
 
+  const simicolonOffset = original[calcOffset(childNode.loc!.end.offset)] === ';' ? 1 : 0
   for (const i of utils) {
     const [, _selector, body, parent] = i
-    const selector = _selector?.replace(regexScopePlaceholder, ' ') || _selector
+    const selectorOrGroup = _selector?.replace(regexScopePlaceholder, ' ') || _selector
 
-    if (parent || (selector && selector !== '.\\-')) {
+    if (parent || (selectorOrGroup && selectorOrGroup !== '.\\-')) {
       let newSelector = generate(node.prelude)
-      if (selector && selector !== '.\\-') {
-        const selectorAST = parse(selector, {
-          context: 'selector',
-        }) as Selector
+      if (selectorOrGroup && selectorOrGroup !== '.\\-') {
+        // use rule context since it could be a selector(.foo) or a selector group(.foo, .bar)
+        const ruleAST = parse(`${selectorOrGroup}{}`, {
+          context: 'rule',
+        }) as Rule
 
         const prelude = clone(node.prelude) as SelectorList
 
         prelude.children.forEach((child) => {
-          const parentSelectorAst = clone(selectorAST) as Selector
-          parentSelectorAst.children.forEach((i) => {
-            if (i.type === 'ClassSelector' && i.name === '\\-')
-              Object.assign(i, clone(child))
+          const selectorListAst = clone(ruleAST.prelude) as SelectorList
+          const classSelectors: List<CssNode> = new List()
+
+          selectorListAst.children.forEach((selectorAst) => {
+            classSelectors.appendList((selectorAst as Selector).children.filter(i => i.type === 'ClassSelector' && i.name === '\\-'))
           })
-          Object.assign(child, parentSelectorAst)
+          classSelectors.forEach(i => Object.assign(i, clone(child)))
+
+          Object.assign(child, selectorListAst)
         })
         newSelector = generate(prelude)
       }
@@ -94,13 +111,21 @@ export async function parseApply({ code, uno, offset, applyVariable }: Transform
     else {
       // If nested css was scoped, put them last.
       if (body.includes('@'))
-        code.appendRight(code.original.length, body)
+        code.appendRight(original.length + simicolonOffset, body)
       else
-        code.appendRight(calcOffset(childNode!.loc!.end.offset), body)
+        code.appendRight(calcOffset(childNode!.loc!.end.offset + simicolonOffset), body)
     }
   }
   code.remove(
     calcOffset(childNode!.loc!.start.offset),
-    calcOffset(childNode!.loc!.end.offset),
+    calcOffset(childNode!.loc!.end.offset + simicolonOffset),
   )
+}
+
+function removeQuotes(value: string) {
+  return value.replace(/^(['"])(.*)\1$/, '$2')
+}
+
+function removeComments(value: string) {
+  return value.replace(/(\/\*(?:.|\n)*?\*\/)|(\/\/.*)/g, '')
 }

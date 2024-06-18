@@ -1,6 +1,8 @@
 export const presetMiniTargets: string[] = [
   // align
   'text-left',
+  'text-align-right',
+  'text-align-inherit',
   'vertical-baseline',
   'vertical-super',
   'vertical-inherit',
@@ -276,11 +278,19 @@ export const presetMiniTargets: string[] = [
   'bg-[length:--variable]',
   'bg-[length:10_20rem]',
   'bg-[length:1/2_20rem]',
+  'bg-[size:--variable]',
+  'bg-[size:10_20rem]',
+  'bg-[size:1/2_20rem]',
   'bg-[position:--variable]',
   'bg-[position:10_20rem]',
   'bg-[position:1/2_20rem]',
   'bg-[position:bottom_left_10%]',
   'bg-[position:top_right_1/3]',
+
+  // arbitrary gradients
+  'bg-[linear-gradient(45deg,#0072ff,#00d2e8,#04fd8f,#70fd6c)]',
+  'bg-[conic-gradient(red,blue)]',
+  'bg-[radial-gradient(red,blue)]',
 
   // color - ring
   'ring-red2',
@@ -366,8 +376,10 @@ export const presetMiniTargets: string[] = [
   'grid-cols-[1fr_2fr_100px_min-content]',
   'grid-cols-2',
   'grid-cols-[repeat(3,auto)]',
+  'cols-[repeat(3,auto)]',
   'grid-rows-[1fr_2fr_100px_min-content]',
   'grid-rows-3',
+  'rows-3',
   'grid',
   'auto-rows-min',
   'auto-rows-fr',
@@ -667,6 +679,11 @@ export const presetMiniTargets: string[] = [
   'mxy',
   'm-xy',
   '-m-lg',
+  '-m-md',
+  'm--lg',
+  'm--md',
+  'm-lg',
+  'm-md',
 
   // static
   'contents',
@@ -777,6 +794,8 @@ export const presetMiniTargets: string[] = [
   'transform-unset',
   'translate-none',
   'translate-y-1/4',
+  'translate-[var(--x),var(--y)]',
+  'translate-[var(--x),var(--y),25%]',
   'translate-y-px',
   'translate-full',
   'translate-x-full',
@@ -788,6 +807,8 @@ export const presetMiniTargets: string[] = [
   'transform-rotate-z-[var(--spin)]',
   'rotate-z-[var(--spin)]',
   'skew-10',
+  'skew-[var(--x),var(--y)]',
+  'skew-[var(--x),var(--y),25%]',
   'skew-x-10',
   'skew-x-10deg',
   'skew-x-10.00deg',
@@ -821,6 +842,9 @@ export const presetMiniTargets: string[] = [
   'transition-property-[border]',
   'transition-200',
   'transition-opacity-200',
+  'transition-colors',
+  'transition-colors,opacity',
+  'transition-colors,opacity-200',
   'transition-color,background-color-200',
   'transition-background-color,color-200',
   'transition',
@@ -874,6 +898,9 @@ export const presetMiniTargets: string[] = [
   'tracking-[2/5]',
   'tracking-inherit',
   'font-tracking-1em',
+  'font-stretch-normal',
+  'font-stretch-[ultra-expanded]',
+  'font-stretch-1/2',
   'word-spacing-1',
   'word-spacing-wide',
   'word-spacing-2',
@@ -944,6 +971,8 @@ export const presetMiniTargets: string[] = [
   'rotate-x-$variable',
   'skew-x-$variable',
   'scale-$variable',
+  'scale-[var(--x),var(--y)]',
+  'scale-[var(--x),var(--y),20%]',
   'scale-x-$variable',
   'transition-delay-$variable',
   'transition-duration-$variable',
@@ -974,6 +1003,9 @@ export const presetMiniTargets: string[] = [
   '[--css-variable-color:theme(colors.red.500/50%)]',
   '[--css-variable-color:theme(colors.green.500),theme(colors.blue.500)]',
   '[--css-spacing:theme(spacing.sm)]',
+  'bg-[--css-spacing,theme(spacing.sm)]',
+  'text-[theme(spacing.sm)]',
+  'c-[theme(colors.red.500/50%)]',
 
   // variants
   'active:scale-4',
@@ -1010,6 +1042,8 @@ export const presetMiniTargets: string[] = [
   '-mt-safe',
   '-!mb-safe',
   '!-ms-safe',
+  '*:p-2',
+  '*-p-2',
 
   // variants class
   'all-[.target]-[combinator:test-2]',
@@ -1112,7 +1146,7 @@ export const presetMiniTargets: string[] = [
   'scope-[unocss]:block',
   'scope-[[data-any]]:inline',
 
-  // variants - tagged
+  // variants - taggedData
   'group-focus:p-4',
   'peer-checked:bg-blue-500',
   'parent-hover:text-center',
@@ -1127,6 +1161,22 @@ export const presetMiniTargets: string[] = [
   'group-[[data-attr]]/label:font-17',
   'group-[.as-parent_&]/label:font-18',
   'group-[.not-parent]/label:font-19',
+
+  // variants - taggedAria
+  'group-aria-focus:p-4',
+  'peer-aria-checked:bg-blue-500',
+  'parent-aria-hover:text-center',
+  'previous-aria-checked/label:bg-red-500',
+  'group-aria-hover:font-10',
+  'group-aria-[:hover]:font-11',
+  'group-aria-[[data-attr]]:font-12',
+  'group-aria-[.as-parent_&]:font-13',
+  'group-aria-[.not-parent]:font-14',
+  'group-aria-hover/label:font-15',
+  'group-aria-[:hover]/label:font-16',
+  'group-aria-[[data-attr]]/label:font-17',
+  'group-aria-[.as-parent_&]/label:font-18',
+  'group-aria-[.not-parent]/label:font-19',
 
   // variants - variables
   '[&:nth-child(2)]:m-10',
@@ -1216,4 +1266,9 @@ export const presetMiniNonTargets = [
   'op50>Foo',
 
   'display-a',
+]
+
+export const specialPresetMiniTargets: string[] = [
+  '[&>*]:content-[\',\\00a0\']',
+  '[&>*:not(:last-child)]:after:content-[\',\\00a0\']',
 ]

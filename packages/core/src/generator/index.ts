@@ -1,9 +1,16 @@
 import { createNanoEvents } from '../utils/events'
-import type { CSSEntries, CSSObject, DynamicRule, ExtendedTokenInfo, ExtractorContext, GenerateOptions, GenerateResult, ParsedUtil, PreflightContext, PreparedRule, RawUtil, ResolvedConfig, RuleContext, RuleMeta, Shortcut, ShortcutValue, StringifiedUtil, UserConfig, UserConfigDefaults, UtilObject, Variant, VariantContext, VariantHandler, VariantHandlerContext, VariantMatchedResult } from '../types'
+import type { BlocklistMeta, BlocklistValue, CSSEntries, CSSEntriesInput, CSSObject, CSSValueInput, ControlSymbols, ControlSymbolsEntry, DynamicRule, ExtendedTokenInfo, ExtractorContext, GenerateOptions, GenerateResult, ParsedUtil, PreflightContext, PreparedRule, RawUtil, ResolvedConfig, RuleContext, RuleMeta, SafeListContext, Shortcut, ShortcutValue, StringifiedUtil, UserConfig, UserConfigDefaults, UtilObject, Variant, VariantContext, VariantHandler, VariantHandlerContext, VariantMatchedResult } from '../types'
 import { resolveConfig } from '../config'
-import { CONTROL_SHORTCUT_NO_MERGE, CountableSet, TwoKeyMap, e, entriesToCss, expandVariantGroup, isCountableSet, isRawUtil, isStaticShortcut, isString, noop, normalizeCSSEntries, normalizeCSSValues, notNull, toArray, uniq, warnOnce } from '../utils'
+import { BetterMap, CountableSet, TwoKeyMap, e, entriesToCss, expandVariantGroup, isCountableSet, isRawUtil, isStaticShortcut, isString, noop, normalizeCSSEntries, normalizeCSSValues, notNull, toArray, uniq, warnOnce } from '../utils'
 import { version } from '../../package.json'
 import { LAYER_DEFAULT, LAYER_PREFLIGHTS } from '../constants'
+
+export const symbols: ControlSymbols = {
+  shortcutsNoMerge: '$$symbol-shortcut-no-merge' as unknown as ControlSymbols['shortcutsNoMerge'],
+  variants: '$$symbol-variants' as unknown as ControlSymbols['variants'],
+  parent: '$$symbol-parent' as unknown as ControlSymbols['parent'],
+  selector: '$$symbol-selector' as unknown as ControlSymbols['selector'],
+}
 
 export class UnoGenerator<Theme extends object = object> {
   public version = version
@@ -87,6 +94,7 @@ export class UnoGenerator<Theme extends object = object> {
       currentSelector: applied[1],
       theme: this.config.theme,
       generator: this,
+      symbols,
       variantHandlers: applied[2],
       constructCSS: (...args) => this.constructCustomCSS(context, ...args),
       variantMatch: applied,
@@ -167,6 +175,8 @@ export class UnoGenerator<Theme extends object = object> {
       extendedInfo = false,
     } = options
 
+    const outputCssLayers = this.config.outputToCssLayers
+
     const tokens: Readonly<Set<string> | CountableSet<string>> = isString(input)
       ? await this.applyExtractors(
         input,
@@ -180,11 +190,18 @@ export class UnoGenerator<Theme extends object = object> {
         : input
 
     if (safelist) {
-      this.config.safelist.forEach((s) => {
-        // We don't want to increment count if token is already in the set
-        if (!tokens.has(s))
-          tokens.add(s)
-      })
+      const safelistContext: SafeListContext<Theme> = {
+        generator: this,
+        theme: this.config.theme,
+      }
+
+      this.config.safelist
+        .flatMap(s => typeof s === 'function' ? s(safelistContext) : s)
+        .forEach((s) => {
+          // We don't want to increment count if token is already in the set
+          if (!tokens.has(s))
+            tokens.add(s)
+        })
     }
 
     const nl = minify ? '' : '\n'
@@ -264,7 +281,7 @@ export class UnoGenerator<Theme extends object = object> {
       .sort((a, b) => ((this.config.layers[a] ?? 0) - (this.config.layers[b] ?? 0)) || a.localeCompare(b)))
 
     const layerCache: Record<string, string> = {}
-    const getLayer = (layer: string) => {
+    const getLayer = (layer: string = LAYER_DEFAULT) => {
       if (layerCache[layer])
         return layerCache[layer]
 
@@ -282,7 +299,7 @@ export class UnoGenerator<Theme extends object = object> {
                 || a[2]?.localeCompare(b[2] || '') // body
                 || 0
             })
-            .map(([, selector, body,, meta,, variantNoMerge]) => {
+            .map(([, selector, body, , meta, , variantNoMerge]) => {
               const scopedSelector = selector ? applyScope(selector, scope) : selector
               return [
                 [[scopedSelector ?? '', meta?.sort ?? 0]],
@@ -337,6 +354,19 @@ export class UnoGenerator<Theme extends object = object> {
           .join(nl)
       }
 
+      if (outputCssLayers && css) {
+        let cssLayer = typeof outputCssLayers === 'object'
+          ? (outputCssLayers.cssLayerName?.(layer))
+          : undefined
+
+        if (cssLayer !== null) {
+          if (!cssLayer)
+            cssLayer = layer
+
+          css = `@layer ${cssLayer}{${nl}${css}${nl}}`
+        }
+      }
+
       const layerMark = minify ? '' : `/* layer: ${layer} */${nl}`
       return layerCache[layer] = css ? layerMark + css : ''
     }
@@ -387,7 +417,7 @@ export class UnoGenerator<Theme extends object = object> {
             continue
           handler = { matcher: handler }
         }
-        processed = handler.matcher
+        processed = handler.matcher ?? processed
         handlers.unshift(handler)
         variants.add(v)
         applied = true
@@ -413,7 +443,9 @@ export class UnoGenerator<Theme extends object = object> {
       .reduceRight(
         (previous, v) => (input: VariantHandlerContext) => {
           const entries = v.body?.(input.entries) || input.entries
-          const parents: [string | undefined, number | undefined] = Array.isArray(v.parent) ? v.parent : [v.parent, undefined]
+          const parents: [string | undefined, number | undefined] = Array.isArray(v.parent)
+            ? v.parent
+            : [v.parent, undefined]
           return (v.handle ?? defaultVariantHandler)({
             ...input,
             entries,
@@ -535,20 +567,60 @@ export class UnoGenerator<Theme extends object = object> {
       if (!match)
         continue
 
-      const result = await handler(match, context)
+      let result = await handler(match, context)
       if (!result)
         continue
 
       if (this.config.details)
         context.rules!.push([matcher, handler, meta] as DynamicRule<Theme>)
 
-      const entries = normalizeCSSValues(result).filter(i => i.length)
+      // Handle generator result
+      if (typeof result !== 'string') {
+        if (Symbol.asyncIterator in result) {
+          const entries: (CSSValueInput | string)[] = []
+          for await (const r of result) {
+            if (r)
+              entries.push(r)
+          }
+          result = entries
+        }
+        else if (Symbol.iterator in result && !Array.isArray(result)) {
+          result = Array.from(result)
+            .filter(notNull)
+        }
+      }
+
+      const entries = normalizeCSSValues(result).filter(i => i.length) as (string | CSSEntriesInput)[]
       if (entries.length) {
-        return entries.map((e) => {
-          if (isString(e))
-            return [i, e, meta]
-          else
-            return [i, raw, e, meta, variantHandlers]
+        return entries.map((css): ParsedUtil | RawUtil => {
+          if (isString(css)) {
+            return [i, css, meta]
+          }
+
+          // Extract variants from special symbols
+          let variants = variantHandlers
+          for (const entry of css) {
+            if (entry[0] === symbols.variants) {
+              variants = [
+                ...toArray(entry[1]),
+                ...variants,
+              ]
+            }
+            else if (entry[0] === symbols.parent) {
+              variants = [
+                { parent: entry[1] },
+                ...variants,
+              ]
+            }
+            else if (entry[0] === symbols.selector) {
+              variants = [
+                { selector: entry[1] },
+                ...variants,
+              ]
+            }
+          }
+
+          return [i, raw, css as CSSEntries, meta, variants]
         })
       }
     }
@@ -563,7 +635,14 @@ export class UnoGenerator<Theme extends object = object> {
     if (isRawUtil(parsed))
       return [parsed[0], undefined, parsed[1], undefined, parsed[2], this.config.details ? context : undefined, undefined]
 
-    const { selector, entries, parent, layer: variantLayer, sort: variantSort, noMerge } = this.applyVariants(parsed)
+    const {
+      selector,
+      entries,
+      parent,
+      layer: variantLayer,
+      sort: variantSort,
+      noMerge,
+    } = this.applyVariants(parsed)
     const body = entriesToCss(entries)
 
     if (!body)
@@ -659,7 +738,8 @@ export class UnoGenerator<Theme extends object = object> {
     expanded: ShortcutValue[],
     meta: RuleMeta = { layer: this.config.shortcutsLayer },
   ): Promise<StringifiedUtil<Theme>[] | undefined> {
-    const selectorMap = new TwoKeyMap<string, string | undefined, [[CSSEntries, boolean, number][], number]>()
+    const layerMap = new BetterMap<string | undefined, TwoKeyMap<string, string | undefined, [[CSSEntries, boolean, number][], number]>>()
+
     const parsed = (
       await Promise.all(uniq(expanded)
         .map(async (i) => {
@@ -684,42 +764,59 @@ export class UnoGenerator<Theme extends object = object> {
         rawStringifiedUtil.push([item[0], undefined, item[1], undefined, item[2], context, undefined])
         continue
       }
-      const { selector, entries, parent, sort, noMerge } = this.applyVariants(item, [...item[4], ...parentVariants], raw)
+      const { selector, entries, parent, sort, noMerge, layer } = this.applyVariants(item, [...item[4], ...parentVariants], raw)
 
+      // find existing layer and merge
+      const selectorMap = layerMap.getFallback(layer ?? meta.layer, new TwoKeyMap())
       // find existing selector/mediaQuery pair and merge
       const mapItem = selectorMap.getFallback(selector, parent, [[], item[0]])
       // add entries
       mapItem[0].push([entries, !!(noMerge ?? item[3]?.noMerge), sort ?? 0])
     }
-    return rawStringifiedUtil.concat(selectorMap
-      .map(([e, index], selector, joinedParents) => {
-        const stringify = (flatten: boolean, noMerge: boolean, entrySortPair: [CSSEntries, number][]): (StringifiedUtil<Theme> | undefined)[] => {
-          const maxSort = Math.max(...entrySortPair.map(e => e[1]))
-          const entriesList = entrySortPair.map(e => e[0])
-          return (flatten ? [entriesList.flat(1)] : entriesList).map((entries: CSSEntries): StringifiedUtil<Theme> | undefined => {
-            const body = entriesToCss(entries)
-            if (body)
-              return [index, selector, body, joinedParents, { ...meta, noMerge, sort: maxSort }, context, undefined]
-            return undefined
+    return rawStringifiedUtil.concat(layerMap
+      .flatMap((selectorMap, layer) =>
+        selectorMap
+          .map(([e, index], selector, joinedParents) => {
+            const stringify = (flatten: boolean, noMerge: boolean, entrySortPair: [CSSEntries, number][]): (StringifiedUtil<Theme> | undefined)[] => {
+              const maxSort = Math.max(...entrySortPair.map(e => e[1]))
+              const entriesList = entrySortPair.map(e => e[0])
+              return (flatten ? [entriesList.flat(1)] : entriesList).map((entries: CSSEntries): StringifiedUtil<Theme> | undefined => {
+                const body = entriesToCss(entries)
+                if (body)
+                  return [index, selector, body, joinedParents, { ...meta, noMerge, sort: maxSort, layer }, context, undefined]
+                return undefined
+              })
+            }
+
+            const merges = [
+              [e.filter(([, noMerge]) => noMerge).map(([entries, , sort]) => [entries, sort]), true],
+              [e.filter(([, noMerge]) => !noMerge).map(([entries, , sort]) => [entries, sort]), false],
+            ] as [[CSSEntries, number][], boolean][]
+
+            return merges.map(([e, noMerge]) => [
+              ...stringify(false, noMerge, e.filter(([entries]) => entries.some(entry => (entry as unknown as ControlSymbolsEntry)[0] === symbols.shortcutsNoMerge))),
+              ...stringify(true, noMerge, e.filter(([entries]) => entries.every(entry => (entry as unknown as ControlSymbolsEntry)[0] !== symbols.shortcutsNoMerge))),
+            ])
           })
-        }
-
-        const merges = [
-          [e.filter(([, noMerge]) => noMerge).map(([entries,, sort]) => [entries, sort]), true],
-          [e.filter(([, noMerge]) => !noMerge).map(([entries,, sort]) => [entries, sort]), false],
-        ] as [[CSSEntries, number][], boolean][]
-
-        return merges.map(([e, noMerge]) => [
-          ...stringify(false, noMerge, e.filter(([entries]) => entries.some(entry => entry[0] === CONTROL_SHORTCUT_NO_MERGE))),
-          ...stringify(true, noMerge, e.filter(([entries]) => entries.every(entry => entry[0] !== CONTROL_SHORTCUT_NO_MERGE))),
-        ])
-      })
-      .flat(2)
-      .filter(Boolean) as StringifiedUtil<Theme>[])
+          .flat(2)
+          .filter(Boolean) as StringifiedUtil<Theme>[],
+      ))
   }
 
   isBlocked(raw: string): boolean {
-    return !raw || this.config.blocklist.some(e => typeof e === 'function' ? e(raw) : isString(e) ? e === raw : e.test(raw))
+    return !raw || this.config.blocklist
+      .map(e => Array.isArray(e) ? e[0] : e)
+      .some(e => typeof e === 'function' ? e(raw) : isString(e) ? e === raw : e.test(raw))
+  }
+
+  getBlocked(raw: string): [BlocklistValue, BlocklistMeta | undefined] | undefined {
+    const rule = this.config.blocklist
+      .find((e) => {
+        const v = Array.isArray(e) ? e[0] : e
+        return typeof v === 'function' ? v(raw) : isString(v) ? v === raw : v.test(raw)
+      })
+
+    return rule ? (Array.isArray(rule) ? rule : [rule, undefined]) : undefined
   }
 }
 

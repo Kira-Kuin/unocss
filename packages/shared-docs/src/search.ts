@@ -4,7 +4,7 @@ import { watchAtMost } from '@vueuse/core'
 import Fuse from 'fuse.js'
 import { createAutocomplete } from '@unocss/autocomplete'
 import type { Ref } from 'vue'
-import { computed, reactive, toRaw } from 'vue'
+import { computed, shallowReactive, toRaw } from 'vue'
 import type { DocItem, GuideItem, ResultItem, RuleItem } from './types'
 import { extractColors, formatCSS, sampleArray } from './utils'
 
@@ -19,8 +19,8 @@ export function createSearch(
   { uno, docs, guides, limit = 50 }: SearchState,
 ) {
   const ac = createAutocomplete(uno)
-  const matchedMap = reactive(new Map<string, RuleItem>())
-  const featuresMap = reactive(new Map<string, Set<RuleItem>>())
+  const matchedMap = shallowReactive(new Map<string, RuleItem>())
+  const featuresMap = shallowReactive(new Map<string, Set<RuleItem>>())
 
   let fuseCollection: ResultItem[] = []
 
@@ -202,15 +202,15 @@ export function createSearch(
   }
 
   function getFeatureUsage(css: string) {
-    const props = uniq([...css.matchAll(/^\s+(\w[\w-]+)\:/mg)].map(i => i[1]))
-    const functions = uniq([...css.matchAll(/\b(\w+)\(/mg)].map(i => `${i[1]}()`))
-    const pseudo = uniq([...css.matchAll(/\:([\w-]+)/mg)].map(i => `:${i[1]}`))
+    const props = uniq([...css.matchAll(/^\s+(\w[\w-]+):/gm)].map(i => i[1]))
+    const functions = uniq([...css.matchAll(/\b(\w+)\(/g)].map(i => `${i[1]}()`))
+    const pseudo = uniq([...css.matchAll(/:([\w-]+)/g)].map(i => `:${i[1]}`))
     return [...props, ...functions, ...pseudo]
       .filter(i => docs.value.find(s => s.title === i))
   }
 
   function getUrls(css: string) {
-    return uniq([...css.matchAll(/\burl\(([^)]+)\)/mg)]
+    return uniq([...css.matchAll(/\burl\(([^)]+)\)/g)]
       .map(i => i[1]))
       .map(i => /^(['"]).*\1$/.test(i) ? i.slice(1, -1) : i)
   }

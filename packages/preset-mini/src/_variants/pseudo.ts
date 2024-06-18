@@ -48,6 +48,7 @@ const PseudoClasses: Record<string, string> = Object.fromEntries([
   'active',
   'enabled',
   'disabled',
+  'popover-open',
 
   // tree-structural
   'root',
@@ -68,8 +69,8 @@ const PseudoClasses: Record<string, string> = Object.fromEntries([
   ['placeholder', '::placeholder'],
   ['before', '::before'],
   ['after', '::after'],
-  ['selection', '::selection'],
-  ['marker', '::marker'],
+  ['selection', ' ::selection'],
+  ['marker', ' ::marker'],
   ['file', '::file-selector-button'],
 ].map(key => Array.isArray(key) ? key : [key, `:${key}`]))
 
@@ -301,10 +302,14 @@ export function variantTaggedPseudoClasses(options: PresetMiniOptions = {}): Var
     tagWithPrefix('peer', '~'),
     tagWithPrefix('parent', '>'),
     tagWithPrefix('previous', '+'),
+    tagWithPrefix('group-aria', ' '),
+    tagWithPrefix('peer-aria', '~'),
+    tagWithPrefix('parent-aria', '>'),
+    tagWithPrefix('previous-aria', '+'),
   ]
 }
 
-const PartClassesRE = /(part-\[(.+)]:)(.+)/
+const PartClassesRE = /(part-\[(.+)\]:)(.+)/
 
 export const variantPartClasses: VariantObject = {
   match(input) {
